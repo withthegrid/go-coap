@@ -3,10 +3,12 @@ package client
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -473,6 +475,26 @@ func (cc *ClientConn) Process(datagram []byte) error {
 	req.SetSequence(cc.Sequence())
 	cc.goPool(func() error {
 		origResp := pool.AcquireMessage(cc.Context())
+
+		const authenticationHeaderID message.OptionID = 2109
+		const updateRequestPrefix string = "firmware/"
+		requestPath, err := req.Options().Path()
+
+		isLegacyDeviceUpdateRequest := req.Token() == nil &&
+			req.Options().HasOption(authenticationHeaderID) &&
+			err == nil &&
+			strings.HasPrefix(requestPath, updateRequestPrefix)
+
+		if isLegacyDeviceUpdateRequest {
+			// Legacy device update request.
+			authenticationHeader, _ := req.Options().GetBytes(authenticationHeaderID)
+			tokenHashData := append([]byte(requestPath), authenticationHeader...)
+			tokenSHA256 := sha256.Sum256(tokenHashData)
+			const maxTokenLength uint8 = 8
+			token := tokenSHA256[:maxTokenLength]
+			req.SetToken(token)
+		}
+
 		origResp.SetToken(req.Token())
 		w := NewResponseWriter(origResp, cc, req.Options())
 		typ := req.Type()
