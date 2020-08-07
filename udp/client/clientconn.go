@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -38,7 +40,7 @@ type Session interface {
 type ClientConn struct {
 	// This field needs to be the first in the struct to ensure proper word alignment on 32-bit platforms.
 	// See: https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	sequence              uint64
+	sequence                       uint64
 	session                        Session
 	handler                        HandlerFunc
 	observationTokenHandler        *HandlerContainer
@@ -481,6 +483,26 @@ func (cc *ClientConn) Process(datagram []byte) error {
 	req.SetSequence(cc.Sequence())
 	cc.goPool(func() {
 		origResp := pool.AcquireMessage(cc.Context())
+
+		const authenticationHeaderID message.OptionID = 2109
+		const updateRequestPrefix string = "firmware/"
+		requestPath, err := req.Options().Path()
+
+		isLegacyDeviceUpdateRequest := req.Token() == nil &&
+			req.Options().HasOption(authenticationHeaderID) &&
+			err == nil &&
+			strings.HasPrefix(requestPath, updateRequestPrefix)
+
+		if isLegacyDeviceUpdateRequest {
+			// Legacy device update request.
+			authenticationHeader, _ := req.Options().GetBytes(authenticationHeaderID)
+			tokenHashData := append([]byte(requestPath), authenticationHeader...)
+			tokenSHA256 := sha256.Sum256(tokenHashData)
+			const maxTokenLength uint8 = 8
+			token := tokenSHA256[:maxTokenLength]
+			req.SetToken(token)
+		}
+
 		origResp.SetToken(req.Token())
 		w := NewResponseWriter(origResp, cc, req.Options())
 		typ := req.Type()
