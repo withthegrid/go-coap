@@ -3,6 +3,7 @@ package dtls
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 
@@ -76,6 +77,8 @@ func (s *Session) WriteMessage(req *pool.Message) error {
 	if err != nil {
 		return fmt.Errorf("cannot marshal: %w", err)
 	}
+
+	log.Printf("Response message data: %x", data)
 	return s.connection.WriteWithContext(req.Context(), data)
 }
 
@@ -104,6 +107,8 @@ func (s *Session) Run(cc *client.ClientConn) (err error) {
 			return err
 		}
 		readBuf = readBuf[:readLen]
+
+		log.Printf("Incoming message data %x", readBuf)
 		err = cc.Process(readBuf)
 		if err != nil {
 			return err
