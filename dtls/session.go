@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	coapNet "github.com/plgd-dev/go-coap/v2/net"
 	"github.com/plgd-dev/go-coap/v2/udp/client"
@@ -117,9 +118,27 @@ func (s *Session) Run(cc *client.ClientConn) (err error) {
 		}
 	}()
 	m := make([]byte, s.maxMessageSize)
+
+	timeout := time.Second * 300
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	go func() {
+		for {
+			select {
+			case <-timer.C:
+				timer.Stop()
+				s.Close()
+				return
+			}
+		}
+	}()
+
 	for {
 		readBuf := m
 		readLen, err := s.connection.ReadWithContext(s.Context(), readBuf)
+		timer.Reset(timeout)
+
 		if err != nil {
 			return err
 		}
